@@ -1,4 +1,6 @@
+import { AutomationStatus } from '@libs/automation/domain/automation/enum/automation-status';
 import { AutomationType } from '@libs/automation/domain/automation/enum/automation-type';
+import { CodeReviewAutomationResult } from '@libs/automation/domain/automationExecution/interfaces/code-review-automation-result.interface';
 import { stripCurlyBracesFromUUIDs } from '@libs/platform/domain/platformIntegrations/types/webhooks/webhooks-bitbucket.type';
 import {
     EXECUTE_AUTOMATION_SERVICE_TOKEN,
@@ -25,7 +27,10 @@ export class RunCodeReviewAutomationUseCase implements IUseCase {
         private readonly codeManagementService: CodeManagementService,
     ) {}
 
-    async execute(params: EnqueueCodeReviewJobInput, signal?: AbortSignal) {
+    async execute(
+        params: EnqueueCodeReviewJobInput,
+        signal?: AbortSignal,
+    ): Promise<CodeReviewAutomationResult> {
         try {
             const {
                 codeManagementPayload: payload,
@@ -38,12 +43,18 @@ export class RunCodeReviewAutomationUseCase implements IUseCase {
             } = params;
 
             if (!this.shouldRunAutomation(payload, platformType)) {
-                return;
+                return {
+                    status: AutomationStatus.SKIPPED,
+                    message: 'Automation skipped for this event',
+                };
             }
 
             const mappedPlatform = getMappedPlatform(platformType);
             if (!mappedPlatform) {
-                return;
+                return {
+                    status: AutomationStatus.ERROR,
+                    message: `Unsupported platform: ${platformType}`,
+                };
             }
 
             const sanitizedPayload =
@@ -57,7 +68,10 @@ export class RunCodeReviewAutomationUseCase implements IUseCase {
             });
 
             if (!action) {
-                return;
+                return {
+                    status: AutomationStatus.ERROR,
+                    message: 'Could not map the code-management action',
+                };
             }
 
             const repository = mappedPlatform.mapRepository({
@@ -65,7 +79,10 @@ export class RunCodeReviewAutomationUseCase implements IUseCase {
             });
 
             if (!repository) {
-                return;
+                return {
+                    status: AutomationStatus.ERROR,
+                    message: 'Could not map the repository',
+                };
             }
 
             let mappedUsers = mappedPlatform.mapUsers({
@@ -126,7 +143,10 @@ export class RunCodeReviewAutomationUseCase implements IUseCase {
                 }
 
                 if (!pullRequestData) {
-                    return;
+                    return {
+                        status: AutomationStatus.ERROR,
+                        message: 'Could not resolve the pull request',
+                    };
                 }
 
                 // adjust it so it looks like the output from mapped platform
@@ -243,7 +263,17 @@ export class RunCodeReviewAutomationUseCase implements IUseCase {
                 strategyParams,
             );
 
-            return result;
+            if (
+                !result ||
+                typeof result !== 'object' ||
+                !Object.values(AutomationStatus).includes(result.status)
+            ) {
+                throw new Error(
+                    'Code review automation returned an invalid outcome',
+                );
+            }
+
+            return result as CodeReviewAutomationResult;
         } catch (error) {
             // This catch swallows everything so a broken review never takes
             // the worker down with it. A refused `@kody review` must not be
@@ -262,6 +292,7 @@ export class RunCodeReviewAutomationUseCase implements IUseCase {
                     ...params.organizationAndTeamData,
                 },
             });
+            throw error;
         }
     }
 

@@ -5,5 +5,9 @@ export interface IJobProcessorService {
 
     handleFailure(jobId: string, error: Error): Promise<void>;
 
-    markCompleted(jobId: string, result?: unknown): Promise<void>;
+    markCompleted(
+        jobId: string,
+        result?: unknown,
+        metadata?: Record<string, unknown>,
+    ): Promise<void>;
 }

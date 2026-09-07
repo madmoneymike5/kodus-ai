@@ -15,6 +15,7 @@ import {
     IAutomationExecutionService,
 } from '@libs/automation/domain/automationExecution/contracts/automation-execution.service';
 import { IAutomationExecution } from '@libs/automation/domain/automationExecution/interfaces/automation-execution.interface';
+import { CodeReviewAutomationResult } from '@libs/automation/domain/automationExecution/interfaces/code-review-automation-result.interface';
 import { IAutomationFactory } from '@libs/automation/domain/automationExecution/processAutomation/automation.factory';
 import {
     ITeamAutomationService,
@@ -46,6 +47,7 @@ const STALE_STARTUP_MESSAGES = new Set([
     'code review started',
     'reviewing file level',
 ]);
+
 import {
     DistributedLock,
     DistributedLockService,
@@ -105,7 +107,7 @@ export class AutomationCodeReviewService implements Omit<
         }
     }
 
-    async run?(payload?: any): Promise<any> {
+    async run?(payload?: any): Promise<CodeReviewAutomationResult> {
         const obs = getObservability();
         const correlationId = obs.getContext()?.correlationId;
 
@@ -123,7 +125,7 @@ export class AutomationCodeReviewService implements Omit<
             heavy,
             userGitId,
             signal,
-        } = payload as Record<string, any>;
+        } = payload;
 
         const orgId = organizationAndTeamData?.organizationId;
         const repoId = repository?.id;
@@ -136,7 +138,10 @@ export class AutomationCodeReviewService implements Omit<
                 context: AutomationCodeReviewService.name,
                 metadata: { orgId, repoId, prNumber },
             });
-            return 'Error: Missing required identifiers for code review';
+            return {
+                status: AutomationStatus.ERROR,
+                message: 'Missing required identifiers for code review',
+            };
         }
 
         // Fail-fast precondition: if the org doesn't exist or is inactive there
@@ -157,7 +162,10 @@ export class AutomationCodeReviewService implements Omit<
                     pullRequestNumber: pullRequest?.number,
                 },
             });
-            return 'No organization found for the provided ID';
+            return {
+                status: AutomationStatus.ERROR,
+                message: 'No organization found for the provided ID',
+            };
         }
 
         const lockKey = `CODE_REVIEW:${orgId}:${repoId}:${prNumber}`;
@@ -214,7 +222,10 @@ export class AutomationCodeReviewService implements Omit<
                 payload,
                 this.holderVisibleUntil(lockHolder?.createdAt),
             );
-            return 'Code review already in progress for this PR';
+            return {
+                status: AutomationStatus.SKIPPED,
+                message: 'Code review already in progress for this PR',
+            };
         }
 
         let execution: IAutomationExecution | null = null;
@@ -242,7 +253,10 @@ export class AutomationCodeReviewService implements Omit<
                     payload,
                     this.holderVisibleUntil(existingExecution.createdAt),
                 );
-                return 'Code review already in progress for this PR';
+                return {
+                    status: AutomationStatus.SKIPPED,
+                    message: 'Code review already in progress for this PR',
+                };
             }
 
             execution = await this.createAutomationExecution(
@@ -261,7 +275,10 @@ export class AutomationCodeReviewService implements Omit<
                         pullRequestNumber: pullRequest?.number,
                     },
                 });
-                return 'Could not create code review execution';
+                return {
+                    status: AutomationStatus.ERROR,
+                    message: 'Could not create code review execution',
+                };
             }
 
             // Check for pre-validation error passed from UseCase
@@ -281,7 +298,10 @@ export class AutomationCodeReviewService implements Omit<
                     `Blocked by validation: ${payload.validationError.errorType}`,
                     this._buildExecutionData(payload),
                 );
-                return `Automation blocked: ${payload.validationError.errorType}`;
+                return {
+                    status: AutomationStatus.ERROR,
+                    message: `Automation blocked: ${payload.validationError.errorType}`,
+                };
             }
 
             // Fetch the last successful execution to pass to the handler
@@ -319,13 +339,12 @@ export class AutomationCodeReviewService implements Omit<
                     heavy, // @kody review --heavy — extra critic pass
                 );
 
-            await this._handleExecutionCompletion(
+            return await this._handleExecutionCompletion(
                 execution,
                 result,
                 payload,
                 lastExecution?.dataExecution,
             );
-            return 'Automation executed successfully';
         } catch (error) {
             // A refused command is not a failed run — there is no execution
             // to mark errored, and swallowing it here would put the request
@@ -334,7 +353,7 @@ export class AutomationCodeReviewService implements Omit<
                 throw error;
             }
             await this._handleExecutionError(execution, error, payload);
-            return 'Error executing automation';
+            throw error;
         } finally {
             if (lock) {
                 try {
@@ -379,7 +398,7 @@ export class AutomationCodeReviewService implements Omit<
 
     private refuseCommand(
         gate: 'lock' | 'execution',
-        payload: Record<string, any>,
+        payload: any,
         holderVisibleUntil: Date,
     ): void {
         const {
@@ -550,6 +569,7 @@ export class AutomationCodeReviewService implements Omit<
                 error: error instanceof Error ? error : undefined,
                 metadata: { executionUuid: entity.uuid, status },
             });
+            throw error;
         }
     }
 
@@ -558,15 +578,17 @@ export class AutomationCodeReviewService implements Omit<
         result: any,
         payload: any,
         lastExecutionData?: Record<string, any>,
-    ) {
+    ): Promise<CodeReviewAutomationResult> {
         if (!result) {
+            const message =
+                'Error processing the pull request: handler returned no result.';
             await this.updateAutomationExecution(
                 execution,
                 AutomationStatus.ERROR,
-                'Error processing the pull request: handler returned no result.',
+                message,
                 this._buildExecutionData(payload, undefined, lastExecutionData),
             );
-            return;
+            return { status: AutomationStatus.ERROR, message };
         }
 
         const finalStatus = this.deriveFinalStatus(result);
@@ -593,6 +615,8 @@ export class AutomationCodeReviewService implements Omit<
                 ...result,
             },
         });
+
+        return { status: finalStatus, message: finalMessage };
     }
 
     /**
@@ -661,13 +685,14 @@ export class AutomationCodeReviewService implements Omit<
                 : 'Code review failed.';
         }
 
-        return result?.statusInfo?.message || 'Automation completed successfully.';
+        return (
+            result?.statusInfo?.message || 'Automation completed successfully.'
+        );
     }
 
     private deriveFinalStatus(result: any): AutomationStatus {
         const statusInfoStatus = result?.statusInfo?.status as
-            | AutomationStatus
-            | undefined;
+            AutomationStatus | undefined;
 
         if (statusInfoStatus === AutomationStatus.SKIPPED) {
             return AutomationStatus.SKIPPED;

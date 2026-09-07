@@ -10,6 +10,8 @@ import { IJobProcessorService } from '@libs/core/workflow/domain/contracts/job-p
 import { IWorkflowJob } from '@libs/core/workflow/domain/interfaces/workflow-job.interface';
 import { ErrorClassification } from '@libs/core/workflow/domain/enums/error-classification.enum';
 import { RunCodeReviewAutomationUseCase } from '@libs/ee/automation/runCodeReview.use-case';
+import { AutomationStatus } from '@libs/automation/domain/automation/enum/automation-status';
+import { CodeReviewAutomationResult } from '@libs/automation/domain/automationExecution/interfaces/code-review-automation-result.interface';
 import { MetricsCollectorService } from '@libs/core/infrastructure/metrics/metrics-collector.service';
 import { EnqueueCodeReviewJobInput } from '@libs/core/workflow/application/use-cases/enqueue-code-review-job.use-case';
 import { NotificationService } from '@libs/notifications/application/notification.service';
@@ -219,7 +221,7 @@ export class CodeReviewJobProcessorService implements IJobProcessorService {
             // pending past the 1h45min router timeout, holding the worker
             // slot zombie. The race guarantees the processor unblocks
             // when the signal fires regardless of how deep the stall is.
-            await raceWithAbortSignal(
+            const result = await raceWithAbortSignal(
                 this.runCodeReviewAutomationUseCase.execute(
                     {
                         codeManagementPayload,
@@ -235,13 +237,18 @@ export class CodeReviewJobProcessorService implements IJobProcessorService {
                 signal,
             );
 
-            await this.markCompleted(jobId);
+            await this.finish(job, result);
 
             const durationMs = Date.now() - startTime;
             this.metricsCollector?.recordHistogram(
                 'code_review_duration_ms',
                 durationMs,
-                { status: 'success' },
+                {
+                    status:
+                        result.status === AutomationStatus.SKIPPED
+                            ? 'skipped'
+                            : 'success',
+                },
             );
         } catch (rawError) {
             // Wrap octokit 403/429 in RateLimitError so the consumer
@@ -349,8 +356,7 @@ export class CodeReviewJobProcessorService implements IJobProcessorService {
                 message:
                     'Failed to tell the user their review request was dropped',
                 context: CodeReviewJobProcessorService.name,
-                error:
-                    notifyError instanceof Error ? notifyError : undefined,
+                error: notifyError instanceof Error ? notifyError : undefined,
                 metadata: { jobId: job.id },
             });
         }
@@ -380,12 +386,57 @@ export class CodeReviewJobProcessorService implements IJobProcessorService {
         });
     }
 
-    async markCompleted(jobId: string, result?: unknown): Promise<void> {
+    async markCompleted(
+        jobId: string,
+        result?: unknown,
+        metadata?: Record<string, unknown>,
+    ): Promise<void> {
         await this.jobRepository.update(jobId, {
             status: JobStatus.COMPLETED,
             completedAt: new Date(),
-            result: result,
+            metadata:
+                result === undefined
+                    ? metadata
+                    : { ...(metadata ?? {}), terminalOutcome: result },
         });
+    }
+
+    private async finish(
+        job: IWorkflowJob,
+        result: CodeReviewAutomationResult,
+    ): Promise<void> {
+        if (!result || typeof result !== 'object') {
+            throw new Error('Code review returned no terminal outcome');
+        }
+
+        switch (result.status) {
+            case AutomationStatus.SUCCESS:
+            case AutomationStatus.PARTIAL_ERROR:
+                await this.markCompleted(
+                    job.id,
+                    result,
+                    this.removeByokConcurrencyGateMetadata(job.metadata),
+                );
+                return;
+            case AutomationStatus.SKIPPED:
+                await this.jobRepository.update(job.id, {
+                    status: JobStatus.CANCELLED,
+                    completedAt: new Date(),
+                    metadata: {
+                        ...(this.removeByokConcurrencyGateMetadata(
+                            job.metadata,
+                        ) ?? {}),
+                        terminalOutcome: result,
+                    },
+                });
+                return;
+            case AutomationStatus.ERROR:
+                throw new Error(result.message || 'Code review failed');
+            default:
+                throw new Error(
+                    `Code review returned non-terminal status: ${result.status}`,
+                );
+        }
     }
 
     private removeByokConcurrencyGateMetadata(

@@ -1,6 +1,7 @@
 import { CodeReviewJobProcessorService } from './code-review-job-processor.service';
 import { PrReviewInProgressError } from '@libs/code-review/domain/errors/pr-review-in-progress.error';
 import { JobStatus } from '@libs/core/workflow/domain/enums/job-status.enum';
+import { AutomationStatus } from '@libs/automation/domain/automation/enum/automation-status';
 
 const TARGET = {
     organizationAndTeamData: { organizationId: 'org-1', teamId: 'team-1' },
@@ -44,7 +45,10 @@ describe('CodeReviewJobProcessorService', () => {
             update: jest.fn().mockResolvedValue(undefined),
         };
         runCodeReviewAutomationUseCase = {
-            execute: jest.fn().mockResolvedValue(undefined),
+            execute: jest.fn().mockResolvedValue({
+                status: AutomationStatus.SUCCESS,
+                message: 'Kody review finished',
+            }),
         };
         byokConcurrencyGateService = {
             tryEnter: jest.fn().mockResolvedValue({ kind: 'unlimited' }),
@@ -56,7 +60,9 @@ describe('CodeReviewJobProcessorService', () => {
         };
         rateLimitGate = { check: jest.fn().mockResolvedValue(undefined) };
         prReviewDeferralService = {
-            next: jest.fn().mockReturnValue({ deferredCount: 1, delayMs: 15000 }),
+            next: jest
+                .fn()
+                .mockReturnValue({ deferredCount: 1, delayMs: 15000 }),
             defer: jest.fn().mockResolvedValue(undefined),
         };
         codeReviewHandlerService = {
@@ -183,6 +189,66 @@ describe('CodeReviewJobProcessorService', () => {
                 expect.objectContaining({ status: JobStatus.FAILED }),
             );
             expect(prReviewDeferralService.defer).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('when automation fails without throwing', () => {
+        it('fails the workflow job with the automation reason', async () => {
+            runCodeReviewAutomationUseCase.execute.mockResolvedValue({
+                status: AutomationStatus.ERROR,
+                message: 'provider unavailable',
+            });
+
+            await expect(service.process('job-1')).rejects.toThrow(
+                'provider unavailable',
+            );
+            expect(jobRepository.update).toHaveBeenCalledWith(
+                'job-1',
+                expect.objectContaining({
+                    status: JobStatus.FAILED,
+                    lastError: 'provider unavailable',
+                }),
+            );
+            expect(jobRepository.update).not.toHaveBeenCalledWith(
+                'job-1',
+                expect.objectContaining({ status: JobStatus.COMPLETED }),
+            );
+        });
+
+        it('fails rather than completing when no outcome is returned', async () => {
+            runCodeReviewAutomationUseCase.execute.mockResolvedValue(undefined);
+
+            await expect(service.process('job-1')).rejects.toThrow(
+                'Code review returned no terminal outcome',
+            );
+            expect(jobRepository.update).not.toHaveBeenCalledWith(
+                'job-1',
+                expect.objectContaining({ status: JobStatus.COMPLETED }),
+            );
+        });
+    });
+
+    describe('when automation intentionally skips the review', () => {
+        it('cancels the workflow job with the terminal reason', async () => {
+            const outcome = {
+                status: AutomationStatus.SKIPPED,
+                message: 'No new commits since the last review',
+            };
+            runCodeReviewAutomationUseCase.execute.mockResolvedValue(outcome);
+
+            await service.process('job-1');
+
+            expect(jobRepository.update).toHaveBeenCalledWith(
+                'job-1',
+                expect.objectContaining({
+                    status: JobStatus.CANCELLED,
+                    metadata: { terminalOutcome: outcome },
+                }),
+            );
+            expect(jobRepository.update).not.toHaveBeenCalledWith(
+                'job-1',
+                expect.objectContaining({ status: JobStatus.COMPLETED }),
+            );
         });
     });
 
