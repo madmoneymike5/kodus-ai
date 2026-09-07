@@ -7,6 +7,7 @@
  *   - The error carries `resetAt` so the consumer error handler can
  *     compute the smart delay.
  */
+import { AutomationStatus } from '@libs/automation/domain/automation/enum/automation-status';
 import { CodeReviewJobProcessorService } from '@libs/code-review/workflow/code-review-job-processor.service';
 import { JobStatus } from '@libs/core/workflow/domain/enums/job-status.enum';
 import { RateLimitError } from '@libs/core/workflow/domain/errors/rate-limit.error';
@@ -56,7 +57,9 @@ describe('CodeReviewJobProcessorService — rate-limit gate integration', () => 
 
     beforeEach(() => {
         jest.clearAllMocks();
-        useCaseExecute = jest.fn().mockResolvedValue(undefined);
+        useCaseExecute = jest.fn().mockResolvedValue({
+            status: AutomationStatus.SUCCESS,
+        });
         gateCheck = jest.fn().mockResolvedValue(undefined);
 
         processor = new CodeReviewJobProcessorService(
