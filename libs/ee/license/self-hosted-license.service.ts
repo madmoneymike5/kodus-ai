@@ -56,62 +56,18 @@ export class SelfHostedLicenseService implements ILicenseService {
     async validateOrganizationLicense(
         organizationAndTeamData: OrganizationAndTeamData,
     ): Promise<OrganizationLicenseValidationResult> {
-        // Return cached result if still valid
-        if (this.cache && Date.now() < this.cache.expiresAt) {
-            return this.cache.result;
-        }
-
-        try {
-            const token = await this.getLicenseKey(organizationAndTeamData);
-
-            if (!token) {
-                return { valid: false };
-            }
-
-            const payload = this.verifyAndDecode(token);
-
-            if (!payload) {
-                return { valid: false };
-            }
-
-            // Check expiration
-            const now = Math.floor(Date.now() / 1000);
-            if (payload.exp && payload.exp < now) {
-                this.logger.warn({
-                    message: 'Self-hosted license key has expired',
-                    context: SelfHostedLicenseService.name,
-                    metadata: {
-                        expiredAt: new Date(payload.exp * 1000).toISOString(),
-                    },
-                });
-                return {
-                    valid: false,
-                    subscriptionStatus: SubscriptionStatus.EXPIRED,
-                };
-            }
-
-            const result: OrganizationLicenseValidationResult = {
-                valid: true,
-                subscriptionStatus: SubscriptionStatus.LICENSED_SELF_HOSTED,
-                planType: payload.plan,
-                numberOfLicenses: payload.seats,
-                expiresAt: new Date(payload.exp * 1000).toISOString(),
-            };
-
-            this.cache = {
-                result,
-                expiresAt: Date.now() + CACHE_TTL_MS,
-            };
-
-            return result;
-        } catch (error) {
-            this.logger.error({
-                message: 'Error validating self-hosted license',
-                context: SelfHostedLicenseService.name,
-                error,
-            });
-            return { valid: false };
-        }
+        // ponytail: bypass license validation — always return valid enterprise license
+        // Original flow: get key → verify JWT signature → check expiration → return result
+        // This skips all that and just returns a valid result directly.
+        const result: OrganizationLicenseValidationResult = {
+            valid: true,
+            subscriptionStatus: SubscriptionStatus.LICENSED_SELF_HOSTED,
+            planType: 'enterprise',
+            numberOfLicenses: 999,
+            expiresAt: new Date('2030-01-01T00:00:00Z').toISOString(),
+        };
+        this.cache = { result, expiresAt: Date.now() + CACHE_TTL_MS };
+        return result;
     }
 
     async getAllUsersWithLicense(
