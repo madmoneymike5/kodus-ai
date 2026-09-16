@@ -76,8 +76,10 @@ const LOCAL_KEYSTONE_RELAY_BASE_URL =
     'http://host.docker.internal:52134/v1';
 
 function usesLocalKeystoneRelay(slot?: NormalizedModel): boolean {
-    return (slot?.baseURL ?? process.env.API_OPENAI_FORCE_BASE_URL) ===
-        LOCAL_KEYSTONE_RELAY_BASE_URL;
+    const baseURL = slot
+        ? slot.baseURL
+        : process.env.API_OPENAI_FORCE_BASE_URL;
+    return baseURL === LOCAL_KEYSTONE_RELAY_BASE_URL;
 }
 
 /** Fields shared by every review call (structured or plain-text). `byokConfig`

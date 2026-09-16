@@ -352,6 +352,31 @@ describe('runStructuredReviewCall — local Keystone plain-text contract', () =>
         }
     });
 
+    it('does not reroute an explicit cloud slot because env points at local relay', async () => {
+        const previousRelay = process.env.API_OPENAI_FORCE_BASE_URL;
+        process.env.API_OPENAI_FORCE_BASE_URL =
+            'http://host.docker.internal:52134/v1';
+        mockGenerate.mockResolvedValueOnce(ok({ answer: 'ok' }));
+
+        try {
+            await expect(
+                runStructuredReviewCall({
+                    ...base,
+                    schema: z.object({ answer: z.string() }),
+                    byokConfig: {
+                        provider: 'openai' as any,
+                        apiKey: 'encrypted-cloud-key',
+                        model: 'gpt-4o',
+                    },
+                }),
+            ).resolves.toEqual({ answer: 'ok' });
+            expect(mockGenerate.mock.calls[0][0]).toHaveProperty('output');
+        } finally {
+            if (previousRelay === undefined) delete process.env.API_OPENAI_FORCE_BASE_URL;
+            else process.env.API_OPENAI_FORCE_BASE_URL = previousRelay;
+        }
+    });
+
     it('also reroutes an explicit local slot, not only the env-managed slot', async () => {
         mockGenerate.mockResolvedValueOnce({
             text: '{"answer":"ok"}',
@@ -387,6 +412,7 @@ describe('runStructuredReviewCall — local Keystone plain-text contract', () =>
                     schema: z.object({ answer: z.string() }),
                 }),
             ).rejects.toThrow('reroute-json produced no valid object');
+            expect(mockGenerate).toHaveBeenCalledTimes(1);
             expect(mockGenerate.mock.calls[0][0]).not.toHaveProperty('output');
         } finally {
             if (previousModel === undefined) delete process.env[modelKey];
