@@ -72,14 +72,25 @@ import {
 import { getLlmObservability } from '@libs/llm/llm-observability';
 
 const logger = createLogger('StructuredReviewCall');
-const LOCAL_KEYSTONE_RELAY_BASE_URL =
-    'http://host.docker.internal:52134/v1';
-
 function usesLocalKeystoneRelay(slot?: NormalizedModel): boolean {
-    const baseURL = slot
-        ? slot.baseURL
-        : process.env.API_OPENAI_FORCE_BASE_URL;
-    return baseURL === LOCAL_KEYSTONE_RELAY_BASE_URL;
+    const baseURL = slot ? slot.baseURL : process.env.API_OPENAI_FORCE_BASE_URL;
+    if (!baseURL || baseURL !== baseURL.trim()) return false;
+
+    try {
+        const parsed = new URL(baseURL);
+        return (
+            parsed.protocol === 'http:' &&
+            parsed.hostname === 'host.docker.internal' &&
+            parsed.port === '52134' &&
+            (parsed.pathname === '/v1' || parsed.pathname === '/v1/') &&
+            !parsed.username &&
+            !parsed.password &&
+            !parsed.search &&
+            !parsed.hash
+        );
+    } catch {
+        return false;
+    }
 }
 
 /** Fields shared by every review call (structured or plain-text). `byokConfig`
@@ -278,7 +289,8 @@ async function runReviewCall<T>(
     // on forced tool_choice + thinking), or the caller asked because the work
     // itself does not benefit from reasoning.
     const suppressReasoning =
-        structuredPlan === 'suppress-thinking' || callerSuppressReasoning === true;
+        structuredPlan === 'suppress-thinking' ||
+        callerSuppressReasoning === true;
 
     const buildInvocation = (structuredOutputs: boolean) =>
         resolveModelConfig(mainSlot, {
@@ -550,9 +562,14 @@ async function runReviewCall<T>(
                 mode.validatingSchema != null &&
                 haveBadValue
             ) {
-                const shaped = normalizeEnvelope(badValue, mode.envelopeKey, [], {
-                    liftEmptyArray: true,
-                });
+                const shaped = normalizeEnvelope(
+                    badValue,
+                    mode.envelopeKey,
+                    [],
+                    {
+                        liftEmptyArray: true,
+                    },
+                );
                 if (shaped !== badValue) {
                     const wireSchema = asSchema(mode.validatingSchema as any);
                     const check =
@@ -663,7 +680,8 @@ export async function runStructuredReviewCall<S extends z.ZodType | Schema>(
     // envelope-key derivation below.
     const jsonForm =
         wireSchema && typeof wireSchema === 'object'
-            ? ((wireSchema as { jsonSchema?: unknown }).jsonSchema ?? wireSchema)
+            ? ((wireSchema as { jsonSchema?: unknown }).jsonSchema ??
+              wireSchema)
             : undefined;
 
     // Stringify the wire JSON schema so the json_object fallback can put the
@@ -683,8 +701,7 @@ export async function runStructuredReviewCall<S extends z.ZodType | Schema>(
     // re-ask still runs).
     let envelopeKey: string | undefined;
     const jf = jsonForm as
-        | { required?: unknown; properties?: unknown }
-        | undefined;
+        { required?: unknown; properties?: unknown } | undefined;
     if (jf && typeof jf === 'object') {
         const required = Array.isArray(jf.required) ? jf.required : [];
         if (typeof required[0] === 'string') {
