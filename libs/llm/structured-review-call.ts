@@ -72,6 +72,13 @@ import {
 import { getLlmObservability } from '@libs/llm/llm-observability';
 
 const logger = createLogger('StructuredReviewCall');
+const LOCAL_KEYSTONE_RELAY_BASE_URL =
+    'http://host.docker.internal:52134/v1';
+
+function usesLocalKeystoneRelay(slot?: NormalizedModel): boolean {
+    return (slot?.baseURL ?? process.env.API_OPENAI_FORCE_BASE_URL) ===
+        LOCAL_KEYSTONE_RELAY_BASE_URL;
+}
 
 /** Fields shared by every review call (structured or plain-text). `byokConfig`
  *  is the bare resolved slot; `buildModelFromSlot`/`getModelName` take it directly. */
@@ -192,6 +199,12 @@ interface ReviewCallMode<T> {
 function resolveStructuredPlan(
     slot: NormalizedModel | undefined,
 ): StructuredCallPlan {
+    // Keystone may dispatch this model to llama.cpp or NInfer. The relay is the
+    // validated local-inference boundary, so use plain text + schema validation
+    // for both engines; neither engine accepts the SDK's structured response
+    // formats reliably. Cloud/BYOK endpoints keep provider capability planning.
+    if (usesLocalKeystoneRelay(slot)) return 'reroute-json';
+
     const provider = slot?.provider as string | undefined;
     if (!provider || !slot?.model || !REGISTRY.has(provider)) {
         return 'as-is';

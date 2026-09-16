@@ -319,6 +319,84 @@ describe('span attrs.fallback — caller override vs default', () => {
     });
 });
 
+describe('runStructuredReviewCall — local Keystone plain-text contract', () => {
+    const modelKey = 'API_LLM_PROVIDER_MODEL';
+    const relayKey = 'API_OPENAI_FORCE_BASE_URL';
+
+    it('does not send Output.object to the local llama.cpp/NInfer relay', async () => {
+        const previousModel = process.env[modelKey];
+        const previousRelay = process.env[relayKey];
+        process.env[modelKey] = 'local-model';
+        process.env[relayKey] = 'http://host.docker.internal:52134/v1';
+        mockGenerate.mockResolvedValueOnce({
+            text: '{"answer":"ok"}',
+            usage: {},
+        });
+
+        try {
+            await expect(
+                runStructuredReviewCall({
+                    ...base,
+                    schema: z.object({ answer: z.string() }),
+                }),
+            ).resolves.toEqual({ answer: 'ok' });
+            expect(mockGenerate.mock.calls[0][0]).not.toHaveProperty('output');
+            expect(mockGenerate.mock.calls[0][0].system).toContain(
+                'Return ONLY a JSON object',
+            );
+        } finally {
+            if (previousModel === undefined) delete process.env[modelKey];
+            else process.env[modelKey] = previousModel;
+            if (previousRelay === undefined) delete process.env[relayKey];
+            else process.env[relayKey] = previousRelay;
+        }
+    });
+
+    it('also reroutes an explicit local slot, not only the env-managed slot', async () => {
+        mockGenerate.mockResolvedValueOnce({
+            text: '{"answer":"ok"}',
+            usage: {},
+        });
+
+        await expect(
+            runStructuredReviewCall({
+                ...base,
+                schema: z.object({ answer: z.string() }),
+                byokConfig: {
+                    provider: 'openai' as any,
+                    apiKey: 'encrypted-local-key',
+                    model: 'llama-or-ninfer-model',
+                    baseURL: 'http://host.docker.internal:52134/v1',
+                },
+            }),
+        ).resolves.toEqual({ answer: 'ok' });
+        expect(mockGenerate.mock.calls[0][0]).not.toHaveProperty('output');
+    });
+
+    it('fails visibly when local inference returns invalid JSON text', async () => {
+        const previousModel = process.env[modelKey];
+        const previousRelay = process.env[relayKey];
+        process.env[modelKey] = 'ninfer-model';
+        process.env[relayKey] = 'http://host.docker.internal:52134/v1';
+        mockGenerate.mockResolvedValueOnce({ text: 'not json', usage: {} });
+
+        try {
+            await expect(
+                runStructuredReviewCall({
+                    ...base,
+                    schema: z.object({ answer: z.string() }),
+                }),
+            ).rejects.toThrow('reroute-json produced no valid object');
+            expect(mockGenerate.mock.calls[0][0]).not.toHaveProperty('output');
+        } finally {
+            if (previousModel === undefined) delete process.env[modelKey];
+            else process.env[modelKey] = previousModel;
+            if (previousRelay === undefined) delete process.env[relayKey];
+            else process.env[relayKey] = previousRelay;
+        }
+    });
+});
+
 describe('runStructuredReviewCall — single-model policy (no runtime fallback)', () => {
     it('trial (no BYOK): runs the ONE resolved model and returns its output', async () => {
         mockGenerate.mockResolvedValueOnce(ok({ violations: [] }));
