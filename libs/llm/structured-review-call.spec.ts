@@ -370,6 +370,27 @@ describe('runStructuredReviewCall — local Keystone plain-text contract', () =>
         expect(mockGenerate.mock.calls[0][0]).toHaveProperty('output');
     });
 
+    it.each(['?', '#'])(
+        'does not reroute a local-looking URL with a bare %s delimiter',
+        async (delimiter) => {
+            mockGenerate.mockResolvedValueOnce(ok({ answer: 'ok' }));
+
+            await expect(
+                runStructuredReviewCall({
+                    ...base,
+                    schema: z.object({ answer: z.string() }),
+                    byokConfig: {
+                        provider: 'openai' as any,
+                        apiKey: 'encrypted-cloud-key',
+                        model: 'gpt-4o',
+                        baseURL: `http://host.docker.internal:52134/v1${delimiter}`,
+                    },
+                }),
+            ).resolves.toEqual({ answer: 'ok' });
+            expect(mockGenerate.mock.calls[0][0]).toHaveProperty('output');
+        },
+    );
+
     it('does not reroute an explicit cloud slot because env points at local relay', async () => {
         const previousRelay = process.env.API_OPENAI_FORCE_BASE_URL;
         process.env.API_OPENAI_FORCE_BASE_URL =

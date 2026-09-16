@@ -74,7 +74,14 @@ import { getLlmObservability } from '@libs/llm/llm-observability';
 const logger = createLogger('StructuredReviewCall');
 function usesLocalKeystoneRelay(slot?: NormalizedModel): boolean {
     const baseURL = slot ? slot.baseURL : process.env.API_OPENAI_FORCE_BASE_URL;
-    if (!baseURL || baseURL !== baseURL.trim()) return false;
+    if (
+        !baseURL ||
+        baseURL !== baseURL.trim() ||
+        baseURL.includes('?') ||
+        baseURL.includes('#')
+    ) {
+        return false;
+    }
 
     try {
         const parsed = new URL(baseURL);
