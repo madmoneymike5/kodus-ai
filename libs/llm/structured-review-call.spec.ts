@@ -319,6 +319,150 @@ describe('span attrs.fallback — caller override vs default', () => {
     });
 });
 
+describe('runStructuredReviewCall — local Keystone plain-text contract', () => {
+    const modelKey = 'API_LLM_PROVIDER_MODEL';
+    const relayKey = 'API_OPENAI_FORCE_BASE_URL';
+
+    it('does not send Output.object to the local llama.cpp/NInfer relay', async () => {
+        const previousModel = process.env[modelKey];
+        const previousRelay = process.env[relayKey];
+        process.env[modelKey] = 'local-model';
+        process.env[relayKey] = 'http://host.docker.internal:52134/v1/';
+        mockGenerate.mockResolvedValueOnce({
+            text: '{"answer":"ok"}',
+            usage: {},
+        });
+
+        try {
+            await expect(
+                runStructuredReviewCall({
+                    ...base,
+                    schema: z.object({ answer: z.string() }),
+                }),
+            ).resolves.toEqual({ answer: 'ok' });
+            expect(mockGenerate.mock.calls[0][0]).not.toHaveProperty('output');
+            expect(mockGenerate.mock.calls[0][0].system).toContain(
+                'Return ONLY a JSON object',
+            );
+        } finally {
+            if (previousModel === undefined) delete process.env[modelKey];
+            else process.env[modelKey] = previousModel;
+            if (previousRelay === undefined) delete process.env[relayKey];
+            else process.env[relayKey] = previousRelay;
+        }
+    });
+
+    it('does not reroute a lookalike host', async () => {
+        mockGenerate.mockResolvedValueOnce(ok({ answer: 'ok' }));
+
+        await expect(
+            runStructuredReviewCall({
+                ...base,
+                schema: z.object({ answer: z.string() }),
+                byokConfig: {
+                    provider: 'openai' as any,
+                    apiKey: 'encrypted-cloud-key',
+                    model: 'gpt-4o',
+                    baseURL: 'http://host.docker.internal.evil:52134/v1',
+                },
+            }),
+        ).resolves.toEqual({ answer: 'ok' });
+        expect(mockGenerate.mock.calls[0][0]).toHaveProperty('output');
+    });
+
+    it.each(['?', '#'])(
+        'does not reroute a local-looking URL with a bare %s delimiter',
+        async (delimiter) => {
+            mockGenerate.mockResolvedValueOnce(ok({ answer: 'ok' }));
+
+            await expect(
+                runStructuredReviewCall({
+                    ...base,
+                    schema: z.object({ answer: z.string() }),
+                    byokConfig: {
+                        provider: 'openai' as any,
+                        apiKey: 'encrypted-cloud-key',
+                        model: 'gpt-4o',
+                        baseURL: `http://host.docker.internal:52134/v1${delimiter}`,
+                    },
+                }),
+            ).resolves.toEqual({ answer: 'ok' });
+            expect(mockGenerate.mock.calls[0][0]).toHaveProperty('output');
+        },
+    );
+
+    it('does not reroute an explicit cloud slot because env points at local relay', async () => {
+        const previousRelay = process.env.API_OPENAI_FORCE_BASE_URL;
+        process.env.API_OPENAI_FORCE_BASE_URL =
+            'http://host.docker.internal:52134/v1';
+        mockGenerate.mockResolvedValueOnce(ok({ answer: 'ok' }));
+
+        try {
+            await expect(
+                runStructuredReviewCall({
+                    ...base,
+                    schema: z.object({ answer: z.string() }),
+                    byokConfig: {
+                        provider: 'openai' as any,
+                        apiKey: 'encrypted-cloud-key',
+                        model: 'gpt-4o',
+                    },
+                }),
+            ).resolves.toEqual({ answer: 'ok' });
+            expect(mockGenerate.mock.calls[0][0]).toHaveProperty('output');
+        } finally {
+            if (previousRelay === undefined)
+                delete process.env.API_OPENAI_FORCE_BASE_URL;
+            else process.env.API_OPENAI_FORCE_BASE_URL = previousRelay;
+        }
+    });
+
+    it('also reroutes an explicit local slot, not only the env-managed slot', async () => {
+        mockGenerate.mockResolvedValueOnce({
+            text: '{"answer":"ok"}',
+            usage: {},
+        });
+
+        await expect(
+            runStructuredReviewCall({
+                ...base,
+                schema: z.object({ answer: z.string() }),
+                byokConfig: {
+                    provider: 'openai' as any,
+                    apiKey: 'encrypted-local-key',
+                    model: 'llama-or-ninfer-model',
+                    baseURL: 'http://host.docker.internal:52134/v1',
+                },
+            }),
+        ).resolves.toEqual({ answer: 'ok' });
+        expect(mockGenerate.mock.calls[0][0]).not.toHaveProperty('output');
+    });
+
+    it('fails visibly when local inference returns invalid JSON text', async () => {
+        const previousModel = process.env[modelKey];
+        const previousRelay = process.env[relayKey];
+        process.env[modelKey] = 'ninfer-model';
+        process.env[relayKey] = 'http://host.docker.internal:52134/v1';
+        mockGenerate.mockResolvedValueOnce({ text: 'not json', usage: {} });
+
+        try {
+            await expect(
+                runStructuredReviewCall({
+                    ...base,
+                    schema: z.object({ answer: z.string() }),
+                }),
+            ).rejects.toThrow('reroute-json produced no valid object');
+            expect(mockGenerate).toHaveBeenCalledTimes(1);
+            expect(mockGenerate.mock.calls[0][0]).not.toHaveProperty('output');
+        } finally {
+            if (previousModel === undefined) delete process.env[modelKey];
+            else process.env[modelKey] = previousModel;
+            if (previousRelay === undefined) delete process.env[relayKey];
+            else process.env[relayKey] = previousRelay;
+        }
+    });
+});
+
 describe('runStructuredReviewCall — single-model policy (no runtime fallback)', () => {
     it('trial (no BYOK): runs the ONE resolved model and returns its output', async () => {
         mockGenerate.mockResolvedValueOnce(ok({ violations: [] }));
@@ -955,14 +1099,18 @@ const keepSchema = z.object({ keep: z.boolean() });
 /** Feed one raw text back on the reroute path and run the parse layer. */
 const parseReroute = <S extends z.ZodType>(schema: S, text: string) => {
     mockGenerate.mockResolvedValueOnce({ text, usage: {} });
-    return runStructuredReviewCall({ ...base, schema, byokConfig: zooKimiSlot });
+    return runStructuredReviewCall({
+        ...base,
+        schema,
+        byokConfig: zooKimiSlot,
+    });
 };
 
 describe('MATRIX A — output-shape zoo (E: json_object/reroute branch, full zoo in scope)', () => {
     it('row 1 — exact D parses and returns verbatim (happy path)', async () => {
-        await expect(parseReroute(keepSchema, '{"keep":true}')).resolves.toEqual(
-            { keep: true },
-        );
+        await expect(
+            parseReroute(keepSchema, '{"keep":true}'),
+        ).resolves.toEqual({ keep: true });
         // Reroute took the plain-generateText channel (NO Output.object).
         expect(mockGenerate.mock.calls[0][0]).not.toHaveProperty('output');
     });
@@ -975,9 +1123,9 @@ describe('MATRIX A — output-shape zoo (E: json_object/reroute branch, full zoo
 
     it('row 3 — single value where D expects an array → SIGNALS', async () => {
         const arrSchema = z.object({ items: z.array(z.number()) });
-        await expect(
-            parseReroute(arrSchema, '{"items":5}'),
-        ).rejects.toThrow('produced no valid object');
+        await expect(parseReroute(arrSchema, '{"items":5}')).rejects.toThrow(
+            'produced no valid object',
+        );
     });
 
     it('row 4 — wrapper key {result:D} is NOT silently unwrapped → SIGNALS', async () => {
@@ -1112,9 +1260,9 @@ describe('MATRIX B — semantic-but-wrong value encodings (reroute parse layer)'
     });
 
     it('row 22 — boolean as yes/no ("yes") → SIGNALS', async () => {
-        await expect(parseReroute(keepSchema, '{"keep":"yes"}')).rejects.toThrow(
-            'produced no valid object',
-        );
+        await expect(
+            parseReroute(keepSchema, '{"keep":"yes"}'),
+        ).rejects.toThrow('produced no valid object');
     });
 
     it('row 23 — boolean as number (1) → SIGNALS', async () => {
@@ -1145,7 +1293,10 @@ describe('MATRIX B — semantic-but-wrong value encodings (reroute parse layer)'
                 noteSchema,
                 '{"keep":true,"note":"h\\u00e9llo \\n 🎉 {not:a:real:brace}"}',
             ),
-        ).resolves.toEqual({ keep: true, note: 'héllo \n 🎉 {not:a:real:brace}' });
+        ).resolves.toEqual({
+            keep: true,
+            note: 'héllo \n 🎉 {not:a:real:brace}',
+        });
     });
 });
 
@@ -1300,7 +1451,10 @@ describe('MATRIX E/#1786 — a raw jsonSchema() caller (no validate fn) is STILL
     } as any);
 
     it('clean D validates and returns', async () => {
-        mockGenerate.mockResolvedValueOnce({ text: '{"keep":true}', usage: {} });
+        mockGenerate.mockResolvedValueOnce({
+            text: '{"keep":true}',
+            usage: {},
+        });
         await expect(
             runStructuredReviewCall({
                 ...base,
@@ -1311,7 +1465,10 @@ describe('MATRIX E/#1786 — a raw jsonSchema() caller (no validate fn) is STILL
     });
 
     it('renamed keys are REJECTED (ensureValidatingSchema compiled an ajv validator) → SIGNALS', async () => {
-        mockGenerate.mockResolvedValueOnce({ text: '{"kept":true}', usage: {} });
+        mockGenerate.mockResolvedValueOnce({
+            text: '{"kept":true}',
+            usage: {},
+        });
         await expect(
             runStructuredReviewCall({
                 ...base,
@@ -1325,7 +1482,11 @@ describe('MATRIX E/#1786 — a raw jsonSchema() caller (no validate fn) is STILL
 describe('MATRIX D — input variants (request assembly threading, happy LLM.run)', () => {
     it('row 35 — empty user prompt threads through verbatim (no substitution)', async () => {
         mockGenerate.mockResolvedValueOnce(ok({ keep: true }));
-        await runStructuredReviewCall({ ...base, schema: keepSchema, user: '' });
+        await runStructuredReviewCall({
+            ...base,
+            schema: keepSchema,
+            user: '',
+        });
         expect(mockGenerate.mock.calls[0][0].prompt).toBe('');
     });
 
