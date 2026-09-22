@@ -6,6 +6,10 @@ import {
     CURRENT_PATH_HEADER,
     CURRENT_SEARCH_HEADER,
 } from "./core/utils/headers";
+import {
+    APP_BASE_PATH,
+    withAppBasePath,
+} from "./core/utils/app-base-path";
 import { handleAuthenticated } from "./core/utils/permissions";
 
 // Public routes that don't need authentication
@@ -45,14 +49,24 @@ const authPaths = [
 // Next 16: `middleware.ts` foi renomeado para `proxy.ts` e roda no runtime
 // nodejs (não mais edge). O Auth.js expõe o wrapper via export nomeado `proxy`.
 export const proxy = auth(async (req) => {
-    const pathname = req.nextUrl.pathname;
+    const requestPathname = req.nextUrl.pathname;
+    const pathname =
+        APP_BASE_PATH &&
+        (requestPathname === APP_BASE_PATH ||
+            requestPathname.startsWith(`${APP_BASE_PATH}/`))
+            ? requestPathname.slice(APP_BASE_PATH.length) || "/"
+            : requestPathname;
 
     if (pathname === "/register") {
-        return NextResponse.redirect(new URL("/sign-up", req.url));
+        return NextResponse.redirect(
+            new URL(withAppBasePath("/sign-up"), req.url),
+        );
     }
 
     if (pathname === "/login") {
-        return NextResponse.redirect(new URL("/sign-in", req.url));
+        return NextResponse.redirect(
+            new URL(withAppBasePath("/sign-in"), req.url),
+        );
     }
 
     if (
@@ -60,7 +74,10 @@ export const proxy = auth(async (req) => {
         req.nextUrl.searchParams.get("setup_action") === "install" &&
         req.nextUrl.searchParams.get("installation_id")
     ) {
-        const url = new URL("/github-integration", req.url);
+        const url = new URL(
+            withAppBasePath("/github-integration"),
+            req.url,
+        );
         url.searchParams.set(
             "installation_id",
             req.nextUrl.searchParams.get("installation_id") ?? "",
@@ -95,7 +112,9 @@ export const proxy = auth(async (req) => {
     // a redirect is performed so that server components receive the new cookies.
     // `next-auth 5.0.0-beta.29` cannot send cookies using NextResponse.next()
     if (user?.reason === "expired-token") {
-        return NextResponse.redirect(new URL(pathname, req.url));
+        return NextResponse.redirect(
+            new URL(withAppBasePath(pathname), req.url),
+        );
     }
 
     // Allows access to public routes
@@ -105,7 +124,9 @@ export const proxy = auth(async (req) => {
     if (!isAuthenticated) {
         // Trying to access a protected route, it redirects to login
         if (!authPaths.some((path) => pathname.startsWith(path))) {
-            return NextResponse.redirect(new URL("/sign-in", req.url));
+            return NextResponse.redirect(
+                new URL(withAppBasePath("/sign-in"), req.url),
+            );
         }
 
         // If it is a public route, allow access
@@ -122,7 +143,10 @@ export const proxy = auth(async (req) => {
         normalizedStatus === UserStatus.REMOVED ||
         normalizedStatus === UserStatus.INACTIVE
     ) {
-        const signOutUrl = new URL("/sign-out", req.url);
+        const signOutUrl = new URL(
+            withAppBasePath("/sign-out"),
+            req.url,
+        );
         signOutUrl.searchParams.set("reason", normalizedStatus);
         return NextResponse.redirect(signOutUrl, {
             status: 302,
@@ -135,9 +159,12 @@ export const proxy = auth(async (req) => {
 
     if (requiresEmailConfirmation) {
         if (!isConfirmEmailPath) {
-            return NextResponse.redirect(new URL("/confirm-email", req.url), {
-                status: 302,
-            });
+            return NextResponse.redirect(
+                new URL(withAppBasePath("/confirm-email"), req.url),
+                {
+                    status: 302,
+                },
+            );
         }
 
         return next;
@@ -149,15 +176,21 @@ export const proxy = auth(async (req) => {
         pathname !== "/user-waiting-for-approval"
     ) {
         return NextResponse.redirect(
-            new URL("/user-waiting-for-approval", req.url),
+            new URL(
+                withAppBasePath("/user-waiting-for-approval"),
+                req.url,
+            ),
         );
     }
 
     // If you are on an authentication route and are already authenticated, redirect to /settings
     if (authPaths.some((path) => pathname.startsWith(path))) {
-        return NextResponse.redirect(new URL("/settings", req.url), {
-            status: 302,
-        });
+        return NextResponse.redirect(
+            new URL(withAppBasePath("/settings"), req.url),
+            {
+                status: 302,
+            },
+        );
     }
 
     return handleAuthenticated(req, pathname, session, next);

@@ -9,5 +9,9 @@
  */
 export function apiProxyPath(path: string): string {
     const normalized = path.startsWith("/") ? path : `/${path}`;
-    return `/api/proxy/api${normalized}`;
+    const basePath = (process.env.NEXT_PUBLIC_APP_BASE_PATH ?? "").replace(
+        /\/$/,
+        "",
+    );
+    return `${basePath}/api/proxy/api${normalized}`;
 }

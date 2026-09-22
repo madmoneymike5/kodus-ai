@@ -8,6 +8,7 @@ import { Heading } from "@components/ui/heading";
 import { SvgKodus } from "@components/ui/icons/SvgKodus";
 import { Page } from "@components/ui/page";
 import { ArrowLeft, LockIcon } from "lucide-react";
+import { withAppBasePath } from "src/core/utils/app-base-path";
 
 // Friendly names for the gated URL prefixes in permissions.routes.ts.
 const AREA_LABELS: Array<{ prefix: string; label: string }> = [
@@ -75,7 +76,7 @@ const ForbiddenCard = () => {
                     size="sm"
                     variant="primary"
                     onClick={() => {
-                        window.location.href = "/";
+                        window.location.href = withAppBasePath("/");
                     }}>
                     Go to start page
                 </Button>

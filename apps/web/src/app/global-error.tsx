@@ -12,6 +12,7 @@ import {
     CardTitle,
 } from "@components/ui/card";
 import { ArrowLeft, RefreshCw, XOctagonIcon } from "lucide-react";
+import { withAppBasePath } from "src/core/utils/app-base-path";
 import { cn } from "src/core/utils/components";
 
 import "./globals.css";
@@ -78,7 +79,7 @@ export default function GlobalError({
                             size="sm"
                             variant="primary"
                             onClick={() => {
-                                window.location.href = "/";
+                                window.location.href = withAppBasePath("/");
                             }}>
                             Go to start page
                         </Button>

@@ -32,6 +32,7 @@ import {
 } from "@services/permissions/types";
 import { type MembersSetup } from "@services/setup/types";
 import { updateUser } from "@services/users/fetch";
+import { withAppBasePath } from "src/core/utils/app-base-path";
 import { ColumnDef } from "@tanstack/react-table";
 import {
     CheckIcon,
@@ -407,7 +408,7 @@ export const columns: ColumnDef<MembersSetup>[] = [
                                     leftIcon={<CopyIcon />}
                                     disabled={!canEdit}
                                     onSelect={() => {
-                                        const inviteLink = `${window.location.origin}/invite/${row.original.userId}`;
+                                        const inviteLink = `${window.location.origin}${withAppBasePath(`/invite/${row.original.userId}`)}`;
                                         const copied =
                                             ClipboardHelpers.copyTextToClipboard(
                                                 inviteLink,

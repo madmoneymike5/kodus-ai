@@ -5,6 +5,7 @@ import { toast } from "@components/ui/toaster/use-toast";
 import type { Session } from "next-auth";
 import type { JWT } from "next-auth/jwt";
 import { SessionProvider, useSession } from "next-auth/react";
+import { APP_BASE_PATH } from "src/core/utils/app-base-path";
 import { refreshAccessToken } from "src/lib/auth/fetchers";
 
 export const AuthProvider = (props: {
@@ -14,6 +15,7 @@ export const AuthProvider = (props: {
     return (
         <SessionProvider
             {...props}
+            basePath={`${APP_BASE_PATH}/api/auth`}
             refetchInterval={0}
             refetchOnWindowFocus={false}
         />

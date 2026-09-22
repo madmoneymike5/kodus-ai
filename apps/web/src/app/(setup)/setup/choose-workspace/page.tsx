@@ -16,6 +16,7 @@ import { joinOrganization } from "@services/users/fetch";
 import { ArrowRight } from "lucide-react";
 import { useAuth } from "src/core/providers/auth.provider";
 import type { AwaitedReturnType } from "src/core/types";
+import { withAppBasePath } from "src/core/utils/app-base-path";
 import { getOrganizationsByDomain } from "src/lib/auth/fetchers";
 
 import { StepIndicators } from "../_components/step-indicators";
@@ -82,7 +83,7 @@ export default function ChooseWorkspacePage() {
 
             await refreshAccessTokens();
 
-            window.location.href = "/";
+            window.location.href = withAppBasePath("/");
         } catch (error) {
             console.error("Failed to update user:", error);
         } finally {

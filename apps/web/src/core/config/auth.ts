@@ -103,6 +103,8 @@ const authOptions: NextAuthConfig = {
         (process.env.NODE_ENV !== "production"
             ? "kodus-web-dev-insecure-secret"
             : undefined),
+    // Next strips the public basePath before invoking the Auth.js handler.
+    basePath: "/api/auth",
     pages: { signIn: "/sign-in", error: "/error" },
     callbacks: {
         redirect: ({ url }) => url, // let middleware control redirects

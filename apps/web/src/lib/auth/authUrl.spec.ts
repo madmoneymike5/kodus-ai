@@ -56,6 +56,8 @@ jest.mock("src/core/config/constants", () => ({
 describe("auth fetchers authUrl dual-mode", () => {
     const WEB_HOSTNAME_API_ORIG = process.env.WEB_HOSTNAME_API;
     const WEB_PORT_API_ORIG = process.env.WEB_PORT_API;
+    const NEXT_PUBLIC_APP_BASE_PATH_ORIG =
+        process.env.NEXT_PUBLIC_APP_BASE_PATH;
     const setServer = (v: boolean) => {
         const mod = require("src/core/utils/server-side");
         mod.__setServerSide(v);
@@ -66,11 +68,13 @@ describe("auth fetchers authUrl dual-mode", () => {
         jest.clearAllMocks();
         process.env.WEB_HOSTNAME_API = "api.test";
         process.env.WEB_PORT_API = "3001";
+        process.env.NEXT_PUBLIC_APP_BASE_PATH = "/kodus";
     });
 
     afterAll(() => {
         process.env.WEB_HOSTNAME_API = WEB_HOSTNAME_API_ORIG;
         process.env.WEB_PORT_API = WEB_PORT_API_ORIG;
+        process.env.NEXT_PUBLIC_APP_BASE_PATH = NEXT_PUBLIC_APP_BASE_PATH_ORIG;
     });
 
     it("server side: loginEmailPassword hits the full upstream URL", async () => {
@@ -90,7 +94,7 @@ describe("auth fetchers authUrl dual-mode", () => {
         const { axiosApi } = await import("src/core/utils/axios");
         await loginEmailPassword({ email: "x@y.z", password: "p" });
         const calledWith = (axiosApi.post as jest.Mock).mock.calls[0][0];
-        expect(calledWith).toBe("/api/proxy/api/auth/login");
+        expect(calledWith).toBe("/kodus/api/proxy/api/auth/login");
         expect(calledWith).not.toContain("UPSTREAM_HOST");
     });
 

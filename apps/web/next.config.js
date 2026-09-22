@@ -26,9 +26,11 @@ if (process.env.ANALYZE === 'true') {
 // host during `next build`, __dirname = <repo>/apps/web; '../..' =
 // monorepo root, which contains both apps/web and libs.
 const projectRoot = path.resolve(__dirname, '..', '..');
+const basePath = process.env.WEB_BASE_PATH || '';
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+    basePath,
     // Emit a self-contained server bundle at .next/standalone so the
     // production image can ship only the files the runtime actually needs
     // (no full node_modules, no devDependencies). Shrinks the web image
@@ -202,15 +204,11 @@ const nextConfig = {
         ];
     },
     reactStrictMode: true,
-    // env: block removed. Public client-facing values come via
-    // ConfigProvider/useConfig() (see waves 1-4). Internal hostnames
-    // (WEB_HOSTNAME_API / WEB_PORT_API / WEB_HOSTNAME_BILLING /
-    // WEB_PORT_BILLING / WEB_HOSTNAME_MCP_MANAGER / WEB_PORT_MCP_MANAGER
-    // and WEB_NODE_ENV) are now read directly from process.env in
-    // server-only modules — the client never sees them. Client fetches
-    // against the upstream API go through the /api/proxy/api/* route
-    // handler introduced in task 7, so build-time inlining is no longer
-    // needed at all.
+    // The base path is public routing configuration; internal service
+    // hostnames must remain server-only.
+    env: {
+        NEXT_PUBLIC_APP_BASE_PATH: basePath,
+    },
 };
 
 module.exports = withBundleAnalyzer(nextConfig);

@@ -21,6 +21,7 @@ import { getCookie, deleteCookie } from "cookies-next/client";
 import { CopyIcon } from "lucide-react";
 import { PlatformType } from "src/core/types";
 import { axiosAuthorized } from "src/core/utils/axios";
+import { withAppBasePath } from "src/core/utils/app-base-path";
 
 type Step = "checking" | "creating" | "success" | "needs-login" | "failed";
 
@@ -44,7 +45,7 @@ export default function GithubIntegrationClient() {
 
     function copyLink() {
         navigator.clipboard.writeText(
-            `${window.location.origin}/setup/github?installation_id=${installationId}`,
+            `${window.location.origin}${withAppBasePath(`/setup/github?installation_id=${installationId}`)}`,
         );
 
         toast({

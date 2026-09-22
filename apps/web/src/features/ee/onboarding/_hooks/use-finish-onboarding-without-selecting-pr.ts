@@ -2,6 +2,7 @@ import { useAsyncAction } from "@hooks/use-async-action";
 import { finishOnboarding } from "@services/codeManagement/fetch";
 import { useSuspenseGetBYOK } from "@services/organizationParameters/hooks";
 import { hasVisibleModels } from "src/features/ee/byok/_utils";
+import { withAppBasePath } from "src/core/utils/app-base-path";
 import { waitFor } from "src/core/utils/helpers";
 import { revalidateServerSideTag } from "src/core/utils/revalidate-server-side";
 import { isSelfHosted } from "src/core/utils/self-hosted";
@@ -48,7 +49,7 @@ export const useFinishOnboardingWithoutSelectingPR = ({
 
             await waitFor(5000);
 
-            window.location.href = "/settings/code-review";
+            window.location.href = withAppBasePath("/settings/code-review");
         } catch (error) {
             console.error(
                 "Error in finishOnboardingWithoutSelectingPR:",
