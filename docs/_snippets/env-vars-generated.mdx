@@ -238,8 +238,11 @@
 | --- | --- | --- | --- | --- |
 | `WEB_NODE_ENV` | – | enum(self-hosted,development,production) | ⚙️ Both |  |
 | `WEB_HOSTNAME_API` | – | string | ⚙️ Both |  |
+| `WEB_PUBLIC_API_URL` | – | url | ⚙️ Both |  |
+| `WEB_BASE_PATH` | – | path | ⚙️ Both |  |
 | `WEB_PORT_API` | – | port | ⚙️ Both |  |
 | `WEB_PORT` | – | port | ⚙️ Both |  |
+| `WEB_PUBLIC_PORT` | – | port | ⚙️ Both |  |
 | `WEB_NEXTAUTH_SECRET` | ✅ | secret | ⚙️ Both | Generate with: openssl rand -base64 32. Must equal NEXTAUTH_SECRET — the installer's generate-secrets.sh mirrors them automatically. |
 | `NEXTAUTH_URL` | – | url | ⚙️ Both |  |
 | `WEB_GITHUB_INSTALL_URL` | – | url | ☁️ Cloud |  |
